@@ -8,7 +8,8 @@
 
 | Гайд | Опис | Агенти |
 |------|------|--------|
-| [Protecting .env files](./env-security/GUIDE.md) | Block AI agents from reading `.env` files with secrets. Auto-generate `.env.example`. | Claude Code, Codex CLI |
+| [Protecting .env files (EN)](./env-security/env-security-guide-eng.md) | Block AI agents from reading `.env` files with secrets. Auto-generate `.env.example`. | Claude Code, Codex CLI |
+| [Захист .env файлів (UA)](./env-security/env-security-guide-ukr.md) | Заборона AI-агентам читати `.env` файли з секретами. Автогенерація `.env.example`. | Claude Code, Codex CLI |
 
 ## Як користуватись
 
