@@ -57,6 +57,11 @@ Same approach — what the situation was, what was done, what the result is.
 - **New task** → new `###` block with the next number
 - **Follow-up on existing task** → update the text in the existing `###` block (don't create a new one)
 
+**Do NOT write in daily report (or changelog):**
+- Technical/operational actions: "started the service", "restarted container", "generated Prisma clients", "ran tests"
+- Intermediate steps: "read the code", "analyzed the file", "checked the logs"
+- Anything that isn't a business task from the user — only real tasks, fixes, features, research
+
 **Example:**
 
 ```markdown
