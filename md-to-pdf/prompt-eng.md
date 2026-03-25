@@ -85,3 +85,21 @@ After fixing, regenerate PDF and re-verify. Repeat until all pages look correct.
 - Chrome launches only during conversion (~2-3 seconds) and closes after. No persistent processes.
 - If `md2pdf` is not found, install it: `npm install -g md-to-pdf`
 - `pdftoppm` is from poppler (`brew install poppler` if not available).
+
+## Installation (instructions for AI agent)
+
+If you were asked to install this skill, follow these steps:
+
+1. Install the dependency (if not already installed):
+   ```bash
+   npm install -g md-to-pdf
+   ```
+2. Create the Claude Code commands directory (if it doesn't exist):
+   ```bash
+   mkdir -p ~/.claude/commands
+   ```
+3. Save the ENTIRE content of this file (from the `---` at the top through the "Notes" section, WITHOUT this "Installation" section) to:
+   ```
+   ~/.claude/commands/md-to-pdf.md
+   ```
+4. Tell the user the skill is installed and they need to restart Claude Code. After restart, the `/md-to-pdf` command will be available.
