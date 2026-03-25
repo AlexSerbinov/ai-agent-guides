@@ -1,5 +1,5 @@
 ---
-description: Convert Markdown file to PDF. Usage: /md-to-pdf <path-to-file.md> [output-path.pdf]
+description: "Convert Markdown file to PDF. Usage: /md-to-pdf <path-to-file.md> [output-path.pdf]"
 parse-arguments: true
 ---
 
