@@ -27,3 +27,5 @@
 Або [почитайте детальніше](https://github.com/AlexSerbinov/ai-agent-guides/blob/main/md-to-pdf/md-to-pdf-guide-ukr.md) як це працює і поставте вручну.
 
 **Передумова:** потрібен пакет `md2pdf` (`npm install -g md-to-pdf`). Агент встановить автоматично якщо не знайде.
+
+Ось можете подивитись [приклад згенерованого PDF](https://github.com/AlexSerbinov/ai-agent-guides/blob/main/md-to-pdf/md-to-pdf-example.pdf) - це гайд по цьому ж скілу, конвертований ним самим :)
