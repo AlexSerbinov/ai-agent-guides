@@ -16,6 +16,8 @@
 | [Stop Hook: Lint & Type Check (UA)](./stop-hook-linting/stop-hook-linting-guide-ukr.md) | Автоматичне виправлення TypeScript помилок типів та lint-порушень перед завершенням агента. oxlint + tsc як quality gate. | Claude Code |
 | [Review Loop: Multi-Agent Code Review (EN)](./review-loop/review-loop-guide-eng.md) | Iterative code review with 6 parallel agents (4 Claude + 1 Codex + 1 Gemini). Auto-fixes issues, loops until quality >= 95%. | Claude Code, Codex CLI, Gemini CLI |
 | [Review Loop: мультиагентне код-рев'ю (UA)](./review-loop/review-loop-guide-ukr.md) | Ітеративне код-рев'ю з 6 паралельними агентами (4 Claude + 1 Codex + 1 Gemini). Авто-фіксить проблеми, крутить цикл поки якість >= 95%. | Claude Code, Codex CLI, Gemini CLI |
+| [Markdown to PDF (EN)](./md-to-pdf/md-to-pdf-guide-eng.md) | Convert Markdown files to high-quality PDFs with a single command. Layout verification, smart edge cases, CSS page-break control. | Claude Code |
+| [Markdown to PDF (UA)](./md-to-pdf/md-to-pdf-guide-ukr.md) | Конвертація Markdown файлів у високоякісні PDF однією командою. Верифікація layout, розумні edge cases, CSS page-break контроль. | Claude Code |
 
 ## Як користуватись
 
