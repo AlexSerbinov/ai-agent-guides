@@ -18,7 +18,7 @@ Convert a Markdown file to a high-quality PDF using md-to-pdf (Puppeteer/Chrome)
    ```
    Set timeout to 30000ms. The command outputs the result path, size, and time.
 5. After conversion, open the PDF with `open <file.pdf>` so the user sees the result.
-6. Open the directory containing the source markdown file with `open <directory>` so the user can see all files.
+6. Open the directory containing the output PDF with `open <directory>` so the user can drag the file wherever needed.
 7. Report success with file path and size.
 
 ## Edge cases
