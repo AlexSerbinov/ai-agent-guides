@@ -29,7 +29,7 @@ Convert a Markdown file to a high-quality PDF using md-to-pdf (Puppeteer/Chrome)
 
 ## Page layout verification (optional, on user request)
 
-After generating the PDF, verify that all elements are on the correct pages - no orphaned headings, no split tables/code blocks, no empty pages, and no pages with mostly white space (less than ~30% content).
+After generating the PDF, verify that all elements are on the correct pages — no orphaned headings, no split tables/code blocks, no empty pages, and no pages with mostly white space (less than ~30% content).
 
 ### How to verify
 
@@ -50,16 +50,17 @@ After generating the PDF, verify that all elements are on the correct pages - no
    - **Split code block**: code block starts on one page, continues on next
    - **Split table**: table header on one page, rows on next
    - **Empty/near-empty page**: only 2-3 lines of text, rest is white space
-   - **Sparse page**: page has content only in the top ~30%, rest is empty
+   - **Sparse page**: page has content only in the top ~30%, rest is empty. This happens when a forced page-break comes after a short section. Pages should be reasonably filled — aim for at least 50% content per page (except title page and last page)
    - **Title page issues**: TOC or content bleeding into title page
 
 ### How to fix
 
-- **Orphaned heading**: Change `**Bold heading**` to `#### Heading` - CSS `h4 { page-break-after: avoid }` prevents orphans
+- **Orphaned heading**: Change `**Bold heading**` to `#### Heading` — CSS `h4 { page-break-after: avoid }` prevents orphans
 - **Empty page from forced page-break**: Remove `<div style="page-break-before: always;"></div>` before short sections
-- **Sparse page**: Remove page-break before the next section so content flows up and fills the page
+- **Sparse page**: Remove page-break before the next section so content flows up and fills the page. Only use forced page-breaks before major sections that have enough content to fill most of the next page
 - **Large code block split**: Break into smaller code blocks with text between them
-- **Large table split**: Split table into two smaller tables
+- **Large table split**: Split table into two smaller tables (e.g., P1 tools and P2 tools)
+- **Content too close to page break**: Remove page-break and let content flow naturally
 
 ### CSS for Markdown files (add at top of .md file)
 
@@ -74,7 +75,7 @@ li { page-break-inside: avoid; }
 </style>
 ```
 
-Use `<div style="page-break-before: always;"></div>` before major sections only. Don't overuse - causes empty pages.
+Use `<div style="page-break-before: always;"></div>` before major sections only. Don't overuse — causes empty pages.
 
 ### Iterate
 
@@ -83,4 +84,4 @@ After fixing, regenerate PDF and re-verify. Repeat until all pages look correct.
 ## Notes
 - Chrome launches only during conversion (~2-3 seconds) and closes after. No persistent processes.
 - If `md2pdf` is not found, install it: `npm install -g md-to-pdf`
-- `pdftoppm` is from poppler (`brew install poppler` on macOS, `apt install poppler-utils` on Linux).
+- `pdftoppm` is from poppler (`brew install poppler` if not available).
