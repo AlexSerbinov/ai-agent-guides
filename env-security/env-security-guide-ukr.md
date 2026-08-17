@@ -16,36 +16,111 @@ AI coding-агенти (Claude Code, Codex, Cursor тощо) можуть нап
 
 ---
 
-## Крок 1: Встановити утиліту для генерації .env.example
+## Крок 1: Скрипт, який тримає .env.example в актуальному стані
+
+### 🚨 Спершу про граблі: генератори .env.example ВИДАЛЯЮТЬ чужі ключі
+
+Найочевидніший шлях — взяти готову утиліту (`@nielse63/copy-env` та подібні), яка бере `.env`, зрізає значення після `=` і зберігає як `.env.example`. Я сам так робив, і саме тут ховається пастка.
+
+**Ці утиліти не мержать, вони ПЕРЕЗАПИСУЮТЬ.** `.env.example` щоразу генерується строго з того, що лежить у твоєму локальному `.env`. Наслідок: усе, чого на цій машині немає, тихо зникає з файлу.
+
+А немає там зазвичай найцікавішого:
+
+- ключів, які живуть тільки в GitHub Secrets / на проді (партнерські refcode-и, платіжні токени);
+- змінних, які додав колега і які ще не доїхали до твого локального `.env`;
+- **коментарів**, що пояснювали кожен такий ключ: де його взяти, чому він порожній, що зламається без нього.
+
+І це не теорія. У бойовому проєкті так тричі зникали 8 партнерських ключів (`FIXED_FLOAT_REFCODE`, `SWAPGATE_REFERRER_ID`, `BITCOINVN_REFERRER` тощо) — тих самих, від яких залежало нарахування комісії. Кожного разу це помічали не одразу і лікували окремим комітом `chore: restore .env.example entries`. Причину знайшли лише тоді, коли зіставили час зникнення з Stop-хуком: хук відпрацьовував **після кожної сесії агента** і акуратно вирізав усе зайве.
+
+Окремо підступність у тому, що git-diff такого перезапису виглядає невинно: рядки зникли — але ж ніхто ж не «видаляв», просто файл «згенерувався».
+
+### Рішення: merge замість overwrite
+
+Замість зовнішньої утиліти — маленький скрипт, який дотримується одного правила: **дописувати можна, видаляти не можна ніколи**.
+
+Що робить:
+
+- бере імена ключів з `.env` (значення не читає й не пише — безпека та сама);
+- дописує в кінець `.env.example` тільки ті, яких там ще немає;
+- **нічого не видаляє** — існуючі ключі, порядок і коментарі лишаються недоторканими;
+- закоментовані рядки (`# OPTIONAL_KEY=`) вважає задокументованими і не воскрешає;
+- ідемпотентний: скільки б разів не запустився — дублікатів не наплодить.
+
+Створи `~/.claude/hooks/merge-env-example.sh` ([готовий файл](scripts/merge-env-example.sh)):
 
 ```bash
-npm install -g @nielse63/copy-env@1.1.0
+#!/bin/bash
+# Keep .env.example in sync with .env WITHOUT ever losing what is already there.
+# Appends missing keys only; never deletes lines, never touches comments,
+# never writes values.
+#
+# Usage: merge-env-example.sh <dir-containing-.env>
+
+set -uo pipefail
+
+dir="${1:?usage: merge-env-example.sh <dir>}"
+env_file="$dir/.env"
+example_file="$dir/.env.example"
+
+[ -f "$env_file" ] || exit 0
+
+# Key names present in .env, in file order. Accepts optional `export ` prefix.
+env_keys=$(grep -E '^[[:space:]]*(export[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*=' "$env_file" 2>/dev/null \
+  | sed -E 's/^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)=.*/\2/')
+
+[ -n "$env_keys" ] || exit 0
+
+if [ ! -f "$example_file" ]; then
+  # First run: nothing to preserve, so a plain listing is safe.
+  printf '%s=\n' $env_keys > "$example_file"
+  exit 0
+fi
+
+# Keys already documented — commented-out ones count too, so a deliberately
+# disabled `# OPTIONAL_KEY=` is not re-added as if it were missing.
+existing_keys=$(grep -E '^[[:space:]]*#?[[:space:]]*(export[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*=' "$example_file" 2>/dev/null \
+  | sed -E 's/^[[:space:]]*#?[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)=.*/\2/')
+
+missing=""
+for key in $env_keys; do
+  if ! printf '%s\n' $existing_keys | grep -qx -- "$key"; then
+    case " $missing " in
+      *" $key "*) ;;                 # already queued (duplicate in .env)
+      *) missing="$missing $key" ;;
+    esac
+  fi
+done
+
+[ -n "${missing// /}" ] || exit 0
+
+# Append under a dated heading so it is obvious these arrived automatically and
+# still need a human comment explaining what they are for.
+{
+  printf '\n# --- added automatically %s (document these) ---\n' "$(date +%Y-%m-%d)"
+  for key in $missing; do printf '%s=\n' "$key"; done
+} >> "$example_file"
 ```
 
-Ця утиліта бере `.env`, видаляє значення після `=`, і зберігає результат як `.env.example`. [Репозиторій](https://github.com/nielse63/copy-env).
-
-> **Про безпеку пакету:** бібліотека маловідома, але я провів повне security та malware сканування вихідного коду — нічого підозрілого не знайдено. Код тривіальний: використовує лише стандартні `fs` та `path`, без runtime-залежностей, без мережевих запитів, без `exec`/`spawn`, без деструктивних операцій. Єдина runtime-залежність — `commander` (стандартна CLI-бібліотека). Тим не менш, додатково раджу вам також самостійно просканувати пакет перед встановленням, якщо бажаєте.
->
-> **Про версію:** в репозиторії налаштований `semantic-release`, який автоматично оновлює залежності та публікує нові версії. Це в цілому безпечно, але для додаткової впевненості команда вище фіксує конкретну версію `1.1.0`, яку я перевірив. Якщо хочете оновитись на новішу — спершу перегляньте changelog та diff змін.
-
-Перевір що встановилось:
+Зроби виконуваним:
 
 ```bash
-copy-env --version
-# 1.1.0
+chmod +x ~/.claude/hooks/merge-env-example.sh
 ```
+
+Нові ключі падають у кінець файлу під датованим заголовком — це навмисно: одразу видно, що приїхало автоматично і ще чекає людського коментаря «що це і де взяти».
 
 ---
 
 ## Крок 2: Налаштування для Claude Code
 
-### 2.1. Stop-хук: автогенерація .env.example
+### 2.1. Stop-хук: оновлення .env.example після кожної сесії
 
 Створи файл `~/.claude/hooks/generate-env-example.sh`:
 
 ```bash
 #!/bin/bash
-# Stop hook: auto-generates .env.example for every .env found in the project
+# Stop hook: keeps .env.example in sync for every .env found in the project.
+# Uses a MERGE (see Step 1) — appends missing keys, never deletes anything.
 
 INPUT=$(cat)
 CWD=$(echo "$INPUT" | jq -r '.cwd // ""')
@@ -54,8 +129,7 @@ if [ -n "$CWD" ]; then
   find "$CWD" -maxdepth 3 -name ".env" \
     -not -path "*/node_modules/*" \
     -not -path "*/.git/*" 2>/dev/null | while read -r envfile; do
-    envdir=$(dirname "$envfile")
-    copy-env --cwd "$envdir" --src .env --dest .env.example 2>/dev/null
+    "$HOME/.claude/hooks/merge-env-example.sh" "$(dirname "$envfile")" 2>/dev/null
   done
 fi
 ```
@@ -65,6 +139,8 @@ fi
 ```bash
 chmod +x ~/.claude/hooks/generate-env-example.sh
 ```
+
+> ⚠️ Якщо ти вже користувався попередньою версією цього гайда з `copy-env` — перевір `git log -p -- .env.example` у своїх проєктах. Цілком імовірно, що звідти вже зникли ключі, і ніхто цього не помітив.
 
 ### 2.2. PreToolUse хук: блокування читання .env
 
@@ -174,7 +250,7 @@ chmod +x ~/.claude/hooks/block-env-read.sh
 
 **Reading `.env` files is FORBIDDEN.** A PreToolUse hook and deny rules enforce this — any attempt to Read `.env` or `cat .env` will be blocked.
 
-**Use `.env.example` instead.** It contains all variable names (keys) without secret values and is always kept in sync with the real `.env` via a Stop hook that auto-generates it using `copy-env`.
+**Use `.env.example` instead.** It contains all variable names (keys) without secret values and is kept in sync with the real `.env` by a Stop hook that MERGES new keys into it (it appends only — it never deletes keys or comments, so entries that exist solely in production or in a colleague's `.env` survive).
 
 Rules:
 - To check which environment variables exist → read `.env.example`
@@ -277,7 +353,8 @@ prefix_rule(pattern=["source", ".env"], decision="forbidden")
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
 │  Stop hook: при завершенні сесії                            │
-│  └─ copy-env .env → .env.example (ключі без значень)        │
+│  └─ merge .env → .env.example (дописує нові ключі,          │
+│     нічого не видаляє, значень не пише)                     │
 │                                                             │
 │  Результат: агент бачить GOOGLE_API_KEY=                     │
 │             але НЕ бачить GOOGLE_API_KEY=sk-abc123...        │
@@ -306,4 +383,4 @@ prefix_rule(pattern=["source", ".env"], decision="forbidden")
 - **`.env.example` можна комітити** в репозиторій — він не містить секретів
 - **Codex має слабший enforcement** ніж Claude Code: `prefix_rule` блокує лише конкретні команди, але не вбудований file read. Тому скіл з `always-loaded: true` — критично важливий
 - **Залежність:** потрібен `jq` для парсингу JSON в хуках. На macOS: `brew install jq`
-- **`@nielse63/copy-env`** — єдина залежність, встановлюється глобально через npm
+- **Жодних зовнішніх залежностей** для генерації — `merge-env-example.sh` це чистий bash. Готові утиліти (`@nielse63/copy-env` тощо) свідомо не використовуються: вони перезаписують `.env.example` і видаляють ключі, яких нема локально (див. Крок 1)

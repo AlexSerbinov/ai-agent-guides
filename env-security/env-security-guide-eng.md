@@ -16,36 +16,111 @@ The agent sees **which variables exist** but **never sees their values**.
 
 ---
 
-## Step 1: Install the utility for generating .env.example
+## Step 1: The script that keeps .env.example current
+
+### 🚨 The trap first: .env.example generators DELETE other people's keys
+
+The obvious approach is an off-the-shelf utility (`@nielse63/copy-env` and friends) that reads `.env`, strips the values after `=`, and saves the result as `.env.example`. That is what I did originally, and that is exactly where the trap is.
+
+**These utilities do not merge — they OVERWRITE.** `.env.example` is regenerated strictly from whatever sits in your local `.env`. Anything this machine does not happen to have silently disappears from the file.
+
+And what is missing locally is usually the interesting part:
+
+- keys that only live in GitHub Secrets or in production (partner refcodes, payment tokens);
+- variables a colleague added that have not reached your local `.env` yet;
+- **the comments** documenting each of those keys: where to obtain it, why it is empty, what breaks without it.
+
+This is not hypothetical. On a production project it wiped 8 affiliate keys three separate times (`FIXED_FLOAT_REFCODE`, `SWAPGATE_REFERRER_ID`, `BITCOINVN_REFERRER` and others) — precisely the ones our commission payouts depended on. Each time it went unnoticed for a while and was patched with a `chore: restore .env.example entries` commit. The cause only surfaced once someone matched the timing against the Stop hook: it ran **after every agent session** and neatly trimmed everything "extra".
+
+The sneaky part is that such an overwrite looks innocent in a git diff: lines are gone, but nobody "deleted" anything — the file was merely "regenerated".
+
+### The fix: merge instead of overwrite
+
+Replace the external utility with a small script that follows a single rule: **appending is allowed, deleting never is.**
+
+What it does:
+
+- reads key names from `.env` (it never reads or writes values — same security posture);
+- appends to `.env.example` only the keys that are not there yet;
+- **deletes nothing** — existing keys, ordering and comments stay untouched;
+- treats commented-out lines (`# OPTIONAL_KEY=`) as documented and does not resurrect them;
+- is idempotent: run it any number of times, no duplicates.
+
+Create `~/.claude/hooks/merge-env-example.sh` ([ready-made file](scripts/merge-env-example.sh)):
 
 ```bash
-npm install -g @nielse63/copy-env@1.1.0
+#!/bin/bash
+# Keep .env.example in sync with .env WITHOUT ever losing what is already there.
+# Appends missing keys only; never deletes lines, never touches comments,
+# never writes values.
+#
+# Usage: merge-env-example.sh <dir-containing-.env>
+
+set -uo pipefail
+
+dir="${1:?usage: merge-env-example.sh <dir>}"
+env_file="$dir/.env"
+example_file="$dir/.env.example"
+
+[ -f "$env_file" ] || exit 0
+
+# Key names present in .env, in file order. Accepts optional `export ` prefix.
+env_keys=$(grep -E '^[[:space:]]*(export[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*=' "$env_file" 2>/dev/null \
+  | sed -E 's/^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)=.*/\2/')
+
+[ -n "$env_keys" ] || exit 0
+
+if [ ! -f "$example_file" ]; then
+  # First run: nothing to preserve, so a plain listing is safe.
+  printf '%s=\n' $env_keys > "$example_file"
+  exit 0
+fi
+
+# Keys already documented — commented-out ones count too, so a deliberately
+# disabled `# OPTIONAL_KEY=` is not re-added as if it were missing.
+existing_keys=$(grep -E '^[[:space:]]*#?[[:space:]]*(export[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*=' "$example_file" 2>/dev/null \
+  | sed -E 's/^[[:space:]]*#?[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)=.*/\2/')
+
+missing=""
+for key in $env_keys; do
+  if ! printf '%s\n' $existing_keys | grep -qx -- "$key"; then
+    case " $missing " in
+      *" $key "*) ;;                 # already queued (duplicate in .env)
+      *) missing="$missing $key" ;;
+    esac
+  fi
+done
+
+[ -n "${missing// /}" ] || exit 0
+
+# Append under a dated heading so it is obvious these arrived automatically and
+# still need a human comment explaining what they are for.
+{
+  printf '\n# --- added automatically %s (document these) ---\n' "$(date +%Y-%m-%d)"
+  for key in $missing; do printf '%s=\n' "$key"; done
+} >> "$example_file"
 ```
 
-This utility takes `.env`, strips values after `=`, and saves the result as `.env.example`. [Repository](https://github.com/nielse63/copy-env).
-
-> **Security note:** this is a lesser-known library, but I performed a full security and malware scan of the source code — nothing suspicious was found. The code is trivial: it only uses standard `fs` and `path`, no runtime dependencies, no network requests, no `exec`/`spawn`, no destructive operations. The only runtime dependency is `commander` (a standard CLI library). That said, I recommend you also scan the package yourself before installing if you wish.
->
-> **Version note:** the repository has `semantic-release` configured, which automatically updates dependencies and publishes new versions. This is generally safe, but for extra confidence the command above pins version `1.1.0`, which I have reviewed. If you want to update to a newer version — review the changelog and diff first.
-
-Verify the installation:
+Make it executable:
 
 ```bash
-copy-env --version
-# 1.1.0
+chmod +x ~/.claude/hooks/merge-env-example.sh
 ```
+
+New keys land at the end of the file under a dated heading on purpose: it is immediately visible that they arrived automatically and still need a human comment explaining what they are and where to get them.
 
 ---
 
 ## Step 2: Setup for Claude Code
 
-### 2.1. Stop hook: auto-generate .env.example
+### 2.1. Stop hook: refresh .env.example after every session
 
 Create file `~/.claude/hooks/generate-env-example.sh`:
 
 ```bash
 #!/bin/bash
-# Stop hook: auto-generates .env.example for every .env found in the project
+# Stop hook: keeps .env.example in sync for every .env found in the project.
+# Uses a MERGE (see Step 1) — appends missing keys, never deletes anything.
 
 INPUT=$(cat)
 CWD=$(echo "$INPUT" | jq -r '.cwd // ""')
@@ -54,8 +129,7 @@ if [ -n "$CWD" ]; then
   find "$CWD" -maxdepth 3 -name ".env" \
     -not -path "*/node_modules/*" \
     -not -path "*/.git/*" 2>/dev/null | while read -r envfile; do
-    envdir=$(dirname "$envfile")
-    copy-env --cwd "$envdir" --src .env --dest .env.example 2>/dev/null
+    "$HOME/.claude/hooks/merge-env-example.sh" "$(dirname "$envfile")" 2>/dev/null
   done
 fi
 ```
@@ -65,6 +139,8 @@ Make it executable:
 ```bash
 chmod +x ~/.claude/hooks/generate-env-example.sh
 ```
+
+> ⚠️ If you followed an earlier version of this guide that used `copy-env` — check `git log -p -- .env.example` in your projects. Keys have quite possibly already vanished from it without anyone noticing.
 
 ### 2.2. PreToolUse hook: block .env reads
 
@@ -174,7 +250,7 @@ Add this to your global `~/.claude/CLAUDE.md`:
 
 **Reading `.env` files is FORBIDDEN.** A PreToolUse hook and deny rules enforce this — any attempt to Read `.env` or `cat .env` will be blocked.
 
-**Use `.env.example` instead.** It contains all variable names (keys) without secret values and is always kept in sync with the real `.env` via a Stop hook that auto-generates it using `copy-env`.
+**Use `.env.example` instead.** It contains all variable names (keys) without secret values and is kept in sync with the real `.env` by a Stop hook that MERGES new keys into it (it appends only — it never deletes keys or comments, so entries that exist solely in production or in a colleague's `.env` survive).
 
 Rules:
 - To check which environment variables exist → read `.env.example`
@@ -277,7 +353,8 @@ Add to the top of `AGENTS.md` in your project root:
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
 │  Stop hook: on session end                                  │
-│  └─ copy-env .env → .env.example (keys without values)      │
+│  └─ merge .env → .env.example (appends new keys only,       │
+│     never deletes, never writes values)                      │
 │                                                             │
 │  Result: agent sees GOOGLE_API_KEY=                          │
 │          but NOT GOOGLE_API_KEY=sk-abc123...                 │
@@ -306,4 +383,4 @@ Expected result — the agent receives a block with the message:
 - **`.env.example` can be committed** to the repository — it contains no secrets
 - **Codex has weaker enforcement** than Claude Code: `prefix_rule` only blocks specific commands, not the built-in file read. That's why the skill with `always-loaded: true` is critical
 - **Dependency:** `jq` is required for JSON parsing in hooks. On macOS: `brew install jq`
-- **`@nielse63/copy-env`** is the only dependency, installed globally via npm
+- **No external dependency** for generation — `merge-env-example.sh` is plain bash. Off-the-shelf utilities (`@nielse63/copy-env` and friends) are deliberately avoided: they overwrite `.env.example` and delete keys that are not present locally (see Step 1)
